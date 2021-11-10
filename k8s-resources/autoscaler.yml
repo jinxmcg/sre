@@ -1,0 +1,9 @@
+# TODO: please add manifests for your autoscaler here
+
+# Autoscaler's deployment MUST be:
+#   name: camunda-autoscaler
+#   namespace: default
+#   image: local.registry/camunda-autoscaler:1.0.0
+#   imagePullPolicy: IfNotPresent
+
+# otherwise the test framework won't find it and kind cluster won't be able to pull it

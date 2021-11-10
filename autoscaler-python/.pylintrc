@@ -1,0 +1,13 @@
+# WARNING: YOU DON'T NEED TO CHANGE THIS FILE
+
+[BASIC]
+
+good-names=i,j,k,ex,Run,_,pk,x,y
+
+[FORMAT]
+
+max-line-length=120
+
+[MESSAGES CONTROL]
+
+disable=import-error,missing-module-docstring,missing-function-docstring,missing-class-docstring

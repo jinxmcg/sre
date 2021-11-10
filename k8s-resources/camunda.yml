@@ -1,0 +1,70 @@
+# WARNING: You don't need to edit this file!
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: camunda-service
+  namespace: default
+spec:
+  selector:
+    app: camunda
+  ports:
+    - protocol: TCP
+      port: 8080
+      targetPort: 8080
+  type: NodePort
+
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: camunda-deployment
+  namespace: default
+  labels:
+    app: camunda
+spec:
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 1
+  replicas: 1
+  selector:
+    matchLabels:
+      app: camunda
+  template:
+    metadata:
+      labels:
+        app: camunda
+    spec:
+      containers:
+      - name: camunda
+        image: camunda/camunda-bpm-platform:tomcat-7.15.0
+        ports:
+        - containerPort: 8080
+        env:
+        - name: DB_DRIVER
+          value: org.postgresql.Driver
+        - name: DB_URL
+          value: jdbc:postgresql://db:5432/process-engine
+        - name: DB_USERNAME
+          value: camunda
+        - name: DB_PASSWORD
+          value: camunda
+        - name: DB_VALIDATE_ON_BORROW
+          value: "true"
+        - name: WAIT_FOR
+          value: db:5432
+        livenessProbe:
+          httpGet:
+            path: /camunda
+            port: 8080
+          initialDelaySeconds: 30
+          periodSeconds: 10
+        readinessProbe:
+          httpGet:
+            path: /camunda
+            port: 8080
+          initialDelaySeconds: 30
+          periodSeconds: 10
+

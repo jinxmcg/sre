@@ -1,0 +1,31 @@
+# WARNING: You don't need to edit this file!
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: camunda-process-starter
+  namespace: default
+  labels:
+    app: process-starter
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: process-starter
+  template:
+    metadata:
+      labels:
+        app: process-starter
+    spec:
+      containers:
+      - name: process-starter
+        image: registry.camunda.cloud/library/sre-interview-process-starter:1.0.19
+        imagePullPolicy: Always
+        env:
+        - name: CAMUNDA_HOST
+          value: "camunda-service:8080"
+        - name: N_PROCESS_STARTED
+          value: "0"
+        - name: QUIET_TIME_S
+          value: "10"
+      terminationGracePeriodSeconds: 5
