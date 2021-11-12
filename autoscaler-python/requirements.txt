@@ -1,1 +1,1 @@
-# TODO: please put all required Python dependencies for your autoscaler here
+requests==2.18.4

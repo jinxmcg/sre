@@ -1,5 +1,3 @@
-# TODO: please add manifests for your autoscaler here
-
 # Autoscaler's deployment MUST be:
 #   name: camunda-autoscaler
 #   namespace: default
@@ -7,3 +5,27 @@
 #   imagePullPolicy: IfNotPresent
 
 # otherwise the test framework won't find it and kind cluster won't be able to pull it
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: camunda-autoscaler
+  namespace: default
+  labels:
+    app: camunda
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: camunda
+  template:
+    metadata:
+      labels:
+        app: camunda
+    spec:
+      containers:
+      - name: camunda-autoscaler
+        image: local.registry/camunda-autoscaler:1.0.0
+        imagePullPolicy: IfNotPresent
+        env:
+        - name: CAMUNDA_URL
+          value: "http://camunda-service:8080/engine-rest/history/process-instance/count"
