@@ -5,27 +5,65 @@
 #   imagePullPolicy: IfNotPresent
 
 # otherwise the test framework won't find it and kind cluster won't be able to pull it
-apiVersion: apps/v1
-kind: Deployment
+
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: myaccount
+  namespace: default
+---
+kind: Role
+apiVersion: rbac.authorization.k8s.io/v1
+metadata:
+  namespace: default
+  name: pods-reader-role
+rules:
+- apiGroups:
+  - "*"
+  resources:
+  - pods
+  - services
+  verbs:
+  - get
+  - list
+  - watch
+- apiGroups:
+  - extensions
+  - apps
+  resources:
+  - deployments
+  - replicasets
+  verbs:
+  - get
+  - list
+  - watch
+---
+kind: RoleBinding
+apiVersion: rbac.authorization.k8s.io/v1
+metadata:
+  name: pod-controller
+  namespace: default
+subjects:
+- kind: ServiceAccount
+  name: myaccount
+  apiGroup: ""
+roleRef:
+  kind: Role
+  name: pods-reader-role
+  apiGroup: ""
+---
+apiVersion: v1
+kind: Pod
 metadata:
   name: camunda-autoscaler
   namespace: default
-  labels:
-    app: camunda
 spec:
-  replicas: 1
-  selector:
-    matchLabels:
-      app: camunda
-  template:
-    metadata:
-      labels:
-        app: camunda
-    spec:
-      containers:
-      - name: camunda-autoscaler
-        image: local.registry/camunda-autoscaler:1.0.0
-        imagePullPolicy: IfNotPresent
-        env:
-        - name: CAMUNDA_URL
-          value: "http://camunda-service:8080/engine-rest/history/process-instance/count"
+  serviceAccountName: myaccount
+  containers:
+  - name: camunda-autoscaler
+    image: local.registry/camunda-autoscaler:1.0.0
+    imagePullPolicy: IfNotPresent
+    env:
+    - name: CAMUNDA_URL
+      value: "http://camunda-service:8080/engine-rest/history/process-instance/count"  
+  restartPolicy: Always

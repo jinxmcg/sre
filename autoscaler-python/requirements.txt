@@ -1,1 +1,1 @@
-requests==2.18.4
+kubernetes==19.15.0
