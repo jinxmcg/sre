@@ -3,7 +3,7 @@ import datetime
 import sys
 import os
 from threading import Event
-from urllib.parse import urlencode, quote_plus
+# from urllib.parse import urlencode, quote_plus
 import requests
 from requests.adapters import HTTPAdapter
 from requests.packages.urllib3.util.retry import Retry
@@ -34,6 +34,7 @@ class AutoScaler:
             print(f"Exception when calling AppsV1Api->read_namespaced_deployment: {exp}")
 
         print(f"CAMUNDA_URL {self.camunda_url}")
+        # self.first_call = datetime.datetime.now()
         self.last_call = datetime.datetime.now() - datetime.timedelta(seconds=10)
 
     @staticmethod
@@ -59,8 +60,8 @@ class AutoScaler:
 
     def scale(self):
         try:
-            params = urlencode({'startedAfter':format_date_camunda(self.last_call)}, quote_via=quote_plus)
-            url = f"{self.camunda_url}?{params}"
+            # params = urlencode({'startedAfter':format_date_camunda(self.last_call)}, quote_via=quote_plus)
+            url = f"{self.camunda_url}?startedAfter={format_date_camunda(self.last_call).replace('+','%2b')}"
             print(f"URL {url}")
             response = self.requests_retry_session().get(
                 url,
