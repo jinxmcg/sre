@@ -9,61 +9,72 @@
 apiVersion: v1
 kind: ServiceAccount
 metadata:
-  name: myaccount
+  name: autoscaler-account
   namespace: default
+
 ---
 kind: Role
 apiVersion: rbac.authorization.k8s.io/v1
 metadata:
   namespace: default
-  name: pods-reader-role
+  name: scaler-role
 rules:
 - apiGroups:
-  - "*"
-  resources:
-  - pods
-  - services
-  verbs:
-  - get
-  - list
-  - watch
-- apiGroups:
-  - extensions
   - apps
   resources:
   - deployments
   - replicasets
+  - pods
   verbs:
+  - patch
   - get
   - list
   - watch
+
 ---
 kind: RoleBinding
 apiVersion: rbac.authorization.k8s.io/v1
 metadata:
-  name: pod-controller
+  name: scaler-role-binding
   namespace: default
 subjects:
 - kind: ServiceAccount
-  name: myaccount
+  name: autoscaler-account
   apiGroup: ""
 roleRef:
   kind: Role
-  name: pods-reader-role
+  name: scaler-role
   apiGroup: ""
+
+
 ---
-apiVersion: v1
-kind: Pod
+apiVersion: apps/v1
+kind: Deployment
 metadata:
   name: camunda-autoscaler
   namespace: default
+  labels:
+    app: camunda
 spec:
-  serviceAccountName: myaccount
-  containers:
-  - name: camunda-autoscaler
-    image: local.registry/camunda-autoscaler:1.0.0
-    imagePullPolicy: IfNotPresent
-    env:
-    - name: CAMUNDA_URL
-      value: "http://camunda-service:8080/engine-rest/history/process-instance/count"  
-  restartPolicy: Always
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 1
+  replicas: 1
+  selector:
+    matchLabels:
+      app: camunda
+  template:
+    metadata:
+      labels:
+        app: camunda
+    spec:
+      serviceAccountName: autoscaler-account
+      containers:
+      - name: camunda-autoscaler
+        image: local.registry/camunda-autoscaler:1.0.0
+        imagePullPolicy: IfNotPresent
+        env:
+        - name: CAMUNDA_URL
+          value: "http://camunda-service:8080/engine-rest/history/process-instance/count"

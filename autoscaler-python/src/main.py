@@ -3,6 +3,7 @@ import datetime
 import sys
 import os
 from threading import Event
+from urllib.parse import urlencode, quote_plus
 import requests
 from requests.adapters import HTTPAdapter
 from requests.packages.urllib3.util.retry import Retry
@@ -17,16 +18,21 @@ def eprint(*args, **kwargs):
 class AutoScaler:
     def __init__(self):
         config.load_incluster_config()
-#        v1 = client.CoreV1Api()
-#        print("Listing pods with their IPs:")
-#        ret = v1.list_pod_for_all_namespaces(watch=False)
-#        for i in ret.items:
-#            print("%s\t%s\t%s" % (i.status.pod_ip, i.metadata.namespace, i.metadata.name))
         self.k8s = client.AppsV1Api()
         self.processes_started = 0
         self.n_replicas = 1
         self.camunda_url = os.getenv('CAMUNDA_URL',
                                      "http://camunda-service:8080/engine-rest/history/process-instance/count")
+
+        # get number initial number of replicas
+        try:
+            api_response = self.k8s.read_namespaced_deployment(name="camunda-deployment",
+                                                               namespace="default")
+            self.n_replicas = api_response.status.replicas
+            # print(api_response.status)
+        except ApiException as exp:
+            print(f"Exception when calling AppsV1Api->read_namespaced_deployment: {exp}")
+
         print(f"CAMUNDA_URL {self.camunda_url}")
         self.last_call = datetime.datetime.now() - datetime.timedelta(seconds=10)
 
@@ -53,9 +59,11 @@ class AutoScaler:
 
     def scale(self):
         try:
+            params = urlencode({'startedAfter':format_date_camunda(self.last_call)}, quote_via=quote_plus)
+            url = f"{self.camunda_url}?{params}"
+            print(f"URL {url}")
             response = self.requests_retry_session().get(
-                self.camunda_url,
-                params={'timestamp': format_date_camunda(self.last_call)},
+                url,
                 headers={'Content-Type': 'application/json'},
             )
         except requests.exceptions.HTTPError as errh:
@@ -78,24 +86,22 @@ class AutoScaler:
                 if processes_started_per_instance >= 50 and self.n_replicas < 4:
                     print("Action: Scaling up")
                     try:
-                        resp = self.k8s.patch_namespaced_replica_set(name="camunda-deployment",
-                                                                     namespace="default",
-                                                                     body={"spec":{"replicas": self.n_replicas + 1}})
-                        print(resp)
+                        self.k8s.patch_namespaced_deployment(name="camunda-deployment",
+                                                             namespace="default",
+                                                             body={"spec":{"replicas": self.n_replicas + 1}})
                         self.n_replicas += 1
                     except ApiException as exc:
-                        print(f"Exception when calling AppsV1Api->patch_namespaced_replica_set: {exc}")
+                        print(f"Exception when calling AppsV1Api->patch_namespaced_deployment: {exc}")
 
                 elif processes_started_per_instance <= 20 and self.n_replicas > 1:
                     print("Action: Scaling down")
                     try:
-                        resp = self.k8s.patch_namespaced_replica_set(name="camunda-deployment",
-                                                                     namespace="default",
-                                                                     body={"spec":{"replicas": self.n_replicas - 1}})
-                        print(resp)
+                        self.k8s.patch_namespaced_deployment(name="camunda-deployment",
+                                                             namespace="default",
+                                                             body={"spec":{"replicas": self.n_replicas - 1}})
                         self.n_replicas -= 1
                     except ApiException as exc:
-                        print(f"Exception when calling AppsV1Api->patch_namespaced_replica_set: {exc}")
+                        print(f"Exception when calling AppsV1Api->patch_namespaced_deployment: {exc}")
                 else:
                     print("Action: Not scaling")
                 self.last_call = datetime.datetime.now()
