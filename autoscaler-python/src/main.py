@@ -3,40 +3,46 @@ import datetime
 import sys
 import os
 from threading import Event
-# from urllib.parse import urlencode, quote_plus
 import requests
 from requests.adapters import HTTPAdapter
 from requests.packages.urllib3.util.retry import Retry
 from kubernetes import client, config
 from kubernetes.client.rest import ApiException
 
+# capture SIG events to stop pod when terminating
 EXIT = Event()
 
+# quick stderr function print
 def eprint(*args, **kwargs):
     print(*args, file=sys.stderr, **kwargs)
 
 class AutoScaler:
     def __init__(self):
+
+        # load k8s cluster config
         config.load_incluster_config()
         self.k8s = client.AppsV1Api()
-        self.processes_started = 0
+        self.delta = 10
         self.n_replicas = 1
         self.camunda_url = os.getenv('CAMUNDA_URL',
                                      "http://camunda-service:8080/engine-rest/history/process-instance/count")
 
-        # get number initial number of replicas
+        self.deployment_to_scale = os.getenv('K8S_DEPLOYMENT', "camunda-deployment")
+        self.deployment_namespace = os.getenv('K8S_NAMESPACE', "default")
+
+        # get initial number of replicas
         try:
-            api_response = self.k8s.read_namespaced_deployment(name="camunda-deployment",
-                                                               namespace="default")
+            api_response = self.k8s.read_namespaced_deployment(name=self.deployment_to_scale,
+                                                               namespace=self.deployment_namespace)
             self.n_replicas = api_response.status.replicas
-            # print(api_response.status)
+
         except ApiException as exp:
-            print(f"Exception when calling AppsV1Api->read_namespaced_deployment: {exp}")
+            eprint(f"Exception when calling AppsV1Api->read_namespaced_deployment: {exp}")
 
-        print(f"CAMUNDA_URL {self.camunda_url}")
-        # self.first_call = datetime.datetime.now()
-        self.last_call = datetime.datetime.now() - datetime.timedelta(seconds=10)
+        # initialize last_call to be N seconds ago
+        self.last_call = datetime.datetime.now() - datetime.timedelta(seconds=self.delta)
 
+    # GET calls with backoff and retry mechanism
     @staticmethod
     def requests_retry_session(
             retries=3,
@@ -44,6 +50,21 @@ class AutoScaler:
             status_forcelist=(500, 502, 504),
             session=None,
     ):
+        """
+        Returns request session capable of retrying and backoff logic
+
+        Args:
+            retries: Number of times to retry retrieving URL
+            backoff_factor: How long to sleep between failed requests
+                            {backoff factor} * (2 ** ({number of total retries} - 1))
+            status_forcelist: the HTTP response codes to retry on
+            session=None,
+
+        Returns:
+            session: session to perform the requests
+
+        """
+
         session = session or requests.Session()
         retry = Retry(
             total=retries,
@@ -59,12 +80,15 @@ class AutoScaler:
 
 
     def scale(self):
+        """
+        Auto scales the configured deployment based on reported load from external URL
+        """
+
+        # get process load in the last N seconds or the amount of seconds since last fail
         try:
-            # params = urlencode({'startedAfter':format_date_camunda(self.last_call)}, quote_via=quote_plus)
-            url = f"{self.camunda_url}?startedAfter={format_date_camunda(self.last_call).replace('+','%2b')}"
-            print(f"URL {url}")
             response = self.requests_retry_session().get(
-                url,
+                self.camunda_url,
+                params={'startedAfter': format_date_camunda(self.last_call)},
                 headers={'Content-Type': 'application/json'},
             )
         except requests.exceptions.HTTPError as errh:
@@ -78,31 +102,34 @@ class AutoScaler:
         else:
             if response.status_code == 200:
                 json_response = response.json()
-                self.processes_started = json_response["count"]
-                processes_started_per_instance = self.processes_started / self.n_replicas
+                processes_started = json_response["count"]
+                processes_started_per_instance = processes_started / self.n_replicas
                 duration = datetime.datetime.now()-self.last_call
+
+                # Scaling logic
+
                 print(f"Camunda Engine Replicas: {self.n_replicas}, "
                       f"Processes started in the last {duration.total_seconds()} "
-                      f"seconds: {self.processes_started}, processes per instance: {processes_started_per_instance}")
+                      f"seconds: {processes_started}, processes per instance: {processes_started_per_instance}")
                 if processes_started_per_instance >= 50 and self.n_replicas < 4:
                     print("Action: Scaling up")
                     try:
-                        self.k8s.patch_namespaced_deployment(name="camunda-deployment",
-                                                             namespace="default",
+                        self.k8s.patch_namespaced_deployment(name=self.deployment_to_scale,
+                                                             namespace=self.deployment_namespace,
                                                              body={"spec":{"replicas": self.n_replicas + 1}})
                         self.n_replicas += 1
                     except ApiException as exc:
-                        print(f"Exception when calling AppsV1Api->patch_namespaced_deployment: {exc}")
+                        eprint(f"Exception when calling AppsV1Api->patch_namespaced_deployment: {exc}")
 
                 elif processes_started_per_instance <= 20 and self.n_replicas > 1:
                     print("Action: Scaling down")
                     try:
-                        self.k8s.patch_namespaced_deployment(name="camunda-deployment",
-                                                             namespace="default",
+                        self.k8s.patch_namespaced_deployment(name=self.deployment_to_scale,
+                                                             namespace=self.deployment_namespace,
                                                              body={"spec":{"replicas": self.n_replicas - 1}})
                         self.n_replicas -= 1
                     except ApiException as exc:
-                        print(f"Exception when calling AppsV1Api->patch_namespaced_deployment: {exc}")
+                        eprint(f"Exception when calling AppsV1Api->patch_namespaced_deployment: {exc}")
                 else:
                     print("Action: Not scaling")
                 self.last_call = datetime.datetime.now()
@@ -131,12 +158,18 @@ def format_date_camunda(date_time: datetime.datetime) -> str:
 
 def main():
     autoscale = AutoScaler()
+
+    try:
+        autoscale.delta = int(os.getenv('DELTA', "10"))
+    except ValueError:
+        autoscale.delta = 10 # the default value in seconds
+
     while not EXIT.is_set():
         autoscale.scale()
-        EXIT.wait(10)
+        # adds the ability to exit while waiting sleep() keeps it blocked for SIGs
+        EXIT.wait(autoscale.delta)
 
     print("All done!")
-    # perform any cleanup here
 
 def quit_me(signo, _frame):
     print("Interrupted by %d, shutting down" % signo)
